@@ -1,0 +1,39 @@
+Hello,
+This repositary contains a basic tower defense game
+
+### Grid-Based Building System:
+• The game has a grid where you can place buildings during the building phase
+• Two types of defensive buildings:
+  • **Cannon**: Medium range, medium damage
+  • **Archer Tower**: Longer range, lower damage but faster firing
+
+### Offensive Units:
+• Two types of troops you can deploy during the battle phase:
+  • **Warriors**: Melee units with high health
+  • **Archers**: Ranged units with lower health but can attack from a distance
+
+### Game Phases:
+1. Building Phase: Place defensive structures on the grid
+2. Battle Phase: Deploy troops to attack the defenses
+
+### Resources:
+• **Gold**: Used primarily for buildings
+• **Elixir**: Used primarily for troops
+• Earn resources by defeating enemy troops
+
+## How to Play:
+
+1. Building Phase:
+   • Click on a building type in the sidebar
+   • Click on the grid to place the selected building
+   • Click "Start Battle" when ready
+
+2. Battle Phase:
+   • Select a troop type from the sidebar
+   • Click on the edges of the map to deploy troops
+   • Troops will automatically target and attack the nearest building
+   • Defenses will automatically target and attack troops in range
+
+3. Victory/Defeat:
+   • Win by destroying all buildings
+   • Lose if all your troops die and you can't afford more
