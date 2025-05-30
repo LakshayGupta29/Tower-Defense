@@ -1,0 +1,520 @@
+#!/usr/bin/env python3
+"""
+Basic Clash of Clans Style Game - A strategic game where you build defenses and deploy troops.
+"""
+import pygame
+import sys
+import math
+import random
+from pygame.locals import *
+
+# Initialize pygame
+pygame.init()
+
+# Constants
+SCREEN_WIDTH = 800
+SCREEN_HEIGHT = 600
+GRID_SIZE = 40  # Size of each grid cell
+FPS = 60
+
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+RED = (255, 0, 0)
+GREEN = (0, 255, 0)
+BLUE = (0, 0, 255)
+YELLOW = (255, 255, 0)
+GRAY = (128, 128, 128)
+LIGHT_GRAY = (200, 200, 200)
+BROWN = (139, 69, 19)
+DARK_GREEN = (0, 100, 0)
+
+# Game settings
+STARTING_GOLD = 500
+STARTING_ELIXIR = 200
+
+# Building costs
+BUILDING_COST = {
+    'cannon': {'gold': 150, 'elixir': 0},
+    'archer_tower': {'gold': 250, 'elixir': 50}
+}
+
+# Troop costs
+TROOP_COST = {
+    'warrior': {'gold': 0, 'elixir': 50},
+    'archer': {'gold': 0, 'elixir': 75}
+}
+
+class GridCell:
+    def __init__(self, row, col, size=GRID_SIZE):
+        self.row = row
+        self.col = col
+        self.x = col * size
+        self.y = row * size
+        self.size = size
+        self.occupied = False
+        self.building = None
+    
+    def draw(self, surface):
+        # Draw grid cell
+        rect = pygame.Rect(self.x, self.y, self.size, self.size)
+        pygame.draw.rect(surface, LIGHT_GRAY, rect, 1)
+        
+        # Draw building if exists
+        if self.building:
+            self.building.draw(surface)
+
+class Building:
+    def __init__(self, row, col, building_type):
+        self.row = row
+        self.col = col
+        self.x = col * GRID_SIZE + GRID_SIZE // 2
+        self.y = row * GRID_SIZE + GRID_SIZE // 2
+        self.building_type = building_type
+        self.width = GRID_SIZE - 4
+        self.height = GRID_SIZE - 4
+        self.health = 100
+        self.max_health = 100
+        self.cooldown = 0
+        
+        # Building properties based on type
+        if building_type == 'cannon':
+            self.range = 150
+            self.damage = 20
+            self.fire_rate = 60  # frames between shots
+            self.color = BLUE
+        elif building_type == 'archer_tower':
+            self.range = 200
+            self.damage = 10
+            self.fire_rate = 30
+            self.color = YELLOW
+    
+    def can_fire(self):
+        return self.cooldown <= 0
+    
+    def find_target(self, troops):
+        closest_troop = None
+        closest_distance = float('inf')
+        
+        for troop in troops:
+            if troop.dead:
+                continue
+                
+            distance = math.sqrt((troop.x - self.x)**2 + (troop.y - self.y)**2)
+            if distance <= self.range and distance < closest_distance:
+                closest_troop = troop
+                closest_distance = distance
+        
+        return closest_troop
+    
+    def fire(self, troops):
+        if not self.can_fire():
+            return []
+            
+        target = self.find_target(troops)
+        if not target:
+            return []
+            
+        self.cooldown = self.fire_rate
+        target.take_damage(self.damage)
+        return [(target, self.damage)]
+    
+    def update(self):
+        if self.cooldown > 0:
+            self.cooldown -= 1
+    
+    def draw(self, surface):
+        # Draw building
+        pygame.draw.rect(surface, self.color, 
+                        (self.x - self.width//2, self.y - self.height//2, 
+                         self.width, self.height))
+        
+        # Draw health bar
+        health_bar_width = GRID_SIZE
+        health_ratio = self.health / self.max_health
+        pygame.draw.rect(surface, BLACK, 
+                        (self.x - health_bar_width//2, self.y - self.height//2 - 10, 
+                         health_bar_width, 5))
+        pygame.draw.rect(surface, GREEN, 
+                        (self.x - health_bar_width//2, self.y - self.height//2 - 10, 
+                         health_bar_width * health_ratio, 5))
+
+class Troop:
+    def __init__(self, x, y, troop_type):
+        self.x = x
+        self.y = y
+        self.troop_type = troop_type
+        self.width = 20
+        self.height = 20
+        self.target = None
+        self.dead = False
+        
+        # Troop properties based on type
+        if troop_type == 'warrior':
+            self.speed = 1.0
+            self.damage = 10
+            self.health = 100
+            self.max_health = 100
+            self.attack_range = 20  # Melee range
+            self.attack_cooldown = 0
+            self.attack_rate = 30  # frames between attacks
+            self.color = RED
+        elif troop_type == 'archer':
+            self.speed = 0.8
+            self.damage = 15
+            self.health = 60
+            self.max_health = 60
+            self.attack_range = 150  # Ranged attack
+            self.attack_cooldown = 0
+            self.attack_rate = 60
+            self.color = GREEN
+    
+    def find_target(self, buildings):
+        closest_building = None
+        closest_distance = float('inf')
+        
+        for building in buildings:
+            distance = math.sqrt((building.x - self.x)**2 + (building.y - self.y)**2)
+            if distance < closest_distance:
+                closest_building = building
+                closest_distance = distance
+        
+        return closest_building
+    
+    def move_towards_target(self):
+        if not self.target or self.target.health <= 0:
+            return
+            
+        # Calculate direction vector
+        dx = self.target.x - self.x
+        dy = self.target.y - self.y
+        distance = math.sqrt(dx**2 + dy**2)
+        
+        # If in attack range, don't move closer
+        if distance <= self.attack_range:
+            return
+            
+        # Normalize direction and move
+        dx = dx / distance * self.speed
+        dy = dy / distance * self.speed
+        self.x += dx
+        self.y += dy
+    
+    def attack(self):
+        if not self.target or self.target.health <= 0 or self.attack_cooldown > 0:
+            return False
+            
+        distance = math.sqrt((self.target.x - self.x)**2 + (self.target.y - self.y)**2)
+        if distance <= self.attack_range:
+            self.target.health -= self.damage
+            self.attack_cooldown = self.attack_rate
+            return True
+            
+        return False
+    
+    def take_damage(self, damage):
+        self.health -= damage
+        if self.health <= 0:
+            self.dead = True
+    
+    def update(self, buildings):
+        if self.dead:
+            return
+            
+        # Find target if don't have one or current target is dead
+        if not self.target or self.target.health <= 0:
+            self.target = self.find_target(buildings)
+            
+        # Move towards target
+        self.move_towards_target()
+        
+        # Attack if possible
+        self.attack()
+        
+        # Update cooldown
+        if self.attack_cooldown > 0:
+            self.attack_cooldown -= 1
+    
+    def draw(self, surface):
+        # Draw troop
+        pygame.draw.circle(surface, self.color, (int(self.x), int(self.y)), self.width//2)
+        
+        # Draw health bar
+        health_bar_width = 30
+        health_ratio = self.health / self.max_health
+        pygame.draw.rect(surface, BLACK, (self.x - health_bar_width//2, self.y - self.height//2 - 10, health_bar_width, 5))
+        pygame.draw.rect(surface, GREEN, (self.x - health_bar_width//2, self.y - self.height//2 - 10, health_bar_width * health_ratio, 5))
+
+class Game:
+    def __init__(self):
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        pygame.display.set_caption("Clash Game")
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.SysFont(None, 24)
+        
+        self.reset_game()
+    
+    def reset_game(self):
+        # Game state
+        self.gold = STARTING_GOLD
+        self.elixir = STARTING_ELIXIR
+        self.game_phase = "building"  # "building" or "battle"
+        self.selected_building_type = 'cannon'
+        self.selected_troop_type = 'warrior'
+        self.game_over = False
+        
+        # Create grid
+        self.grid = []
+        self.rows = SCREEN_HEIGHT // GRID_SIZE
+        self.cols = (SCREEN_WIDTH - 200) // GRID_SIZE  # Reserve space for UI
+        
+        for row in range(self.rows):
+            grid_row = []
+            for col in range(self.cols):
+                grid_row.append(GridCell(row, col))
+            self.grid.append(grid_row)
+        
+        # Game objects
+        self.buildings = []
+        self.troops = []
+    
+    def place_building(self, row, col):
+        # Check if we have enough resources
+        if (self.gold < BUILDING_COST[self.selected_building_type]['gold'] or 
+            self.elixir < BUILDING_COST[self.selected_building_type]['elixir']):
+            return False
+        
+        # Check if cell is valid and not occupied
+        if 0 <= row < self.rows and 0 <= col < self.cols and not self.grid[row][col].occupied:
+            # Place building
+            building = Building(row, col, self.selected_building_type)
+            self.buildings.append(building)
+            self.grid[row][col].occupied = True
+            self.grid[row][col].building = building
+            
+            # Deduct resources
+            self.gold -= BUILDING_COST[self.selected_building_type]['gold']
+            self.elixir -= BUILDING_COST[self.selected_building_type]['elixir']
+            return True
+            
+        return False
+    
+    def deploy_troop(self, x, y):
+        # Check if we have enough resources
+        if (self.gold < TROOP_COST[self.selected_troop_type]['gold'] or 
+            self.elixir < TROOP_COST[self.selected_troop_type]['elixir']):
+            return False
+        
+        # Check if position is valid (only deploy on the edges in battle phase)
+        if self.game_phase == "battle":
+            # Only allow deployment on the edges of the map
+            grid_x = x // GRID_SIZE
+            grid_y = y // GRID_SIZE
+            
+            if not (grid_x == 0 or grid_x == self.cols - 1 or grid_y == 0 or grid_y == self.rows - 1):
+                return False
+            
+            # Deploy troop
+            troop = Troop(x, y, self.selected_troop_type)
+            self.troops.append(troop)
+            
+            # Deduct resources
+            self.gold -= TROOP_COST[self.selected_troop_type]['gold']
+            self.elixir -= TROOP_COST[self.selected_troop_type]['elixir']
+            return True
+            
+        return False
+    
+    def update(self):
+        if self.game_over:
+            return
+            
+        # Update buildings
+        for building in self.buildings[:]:
+            building.update()
+            if self.game_phase == "battle":
+                building.fire(self.troops)
+            
+            # Remove destroyed buildings
+            if building.health <= 0:
+                row, col = building.row, building.col
+                self.grid[row][col].occupied = False
+                self.grid[row][col].building = None
+                self.buildings.remove(building)
+        
+        # Update troops in battle phase
+        if self.game_phase == "battle":
+            for troop in self.troops[:]:
+                troop.update(self.buildings)
+                
+                # Remove dead troops
+                if troop.dead:
+                    self.troops.remove(troop)
+                    # Get resources for killing troops
+                    self.gold += 10
+                    self.elixir += 5
+        
+        # Check win/lose conditions in battle phase
+        if self.game_phase == "battle":
+            # Player wins if all buildings are destroyed
+            if not self.buildings and self.game_phase == "battle":
+                self.game_over = True
+                self.victory = True
+            
+            # Player loses if all troops are dead and they can't afford more
+            if (not self.troops and 
+                self.gold < min([TROOP_COST[t]['gold'] for t in TROOP_COST]) and
+                self.elixir < min([TROOP_COST[t]['elixir'] for t in TROOP_COST])):
+                self.game_over = True
+                self.victory = False
+    
+    def draw(self):
+        self.screen.fill(WHITE)
+        
+        # Draw grid and buildings
+        for row in self.grid:
+            for cell in row:
+                cell.draw(self.screen)
+        
+        # Draw troops
+        for troop in self.troops:
+            troop.draw(self.screen)
+        
+        # Draw UI
+        self.draw_ui()
+        
+        pygame.display.flip()
+    
+    def draw_ui(self):
+        # Draw sidebar background
+        pygame.draw.rect(self.screen, GRAY, (SCREEN_WIDTH - 200, 0, 200, SCREEN_HEIGHT))
+        
+        # Draw resources
+        gold_text = self.font.render(f"Gold: {self.gold}", True, BLACK)
+        elixir_text = self.font.render(f"Elixir: {self.elixir}", True, BLACK)
+        self.screen.blit(gold_text, (SCREEN_WIDTH - 190, 10))
+        self.screen.blit(elixir_text, (SCREEN_WIDTH - 190, 40))
+        
+        # Draw phase indicator
+        phase_text = self.font.render(f"Phase: {self.game_phase.capitalize()}", True, BLACK)
+        self.screen.blit(phase_text, (SCREEN_WIDTH - 190, 70))
+        
+        # Draw building selection UI (only in building phase)
+        if self.game_phase == "building":
+            title_text = self.font.render("Buildings", True, BLACK)
+            self.screen.blit(title_text, (SCREEN_WIDTH - 150, 100))
+            
+            # Cannon
+            pygame.draw.rect(self.screen, BLUE, (SCREEN_WIDTH - 180, 130, 30, 30))
+            cannon_text = self.font.render(f"Cannon: {BUILDING_COST['cannon']['gold']}g", True, BLACK)
+            self.screen.blit(cannon_text, (SCREEN_WIDTH - 140, 135))
+            
+            # Archer Tower
+            pygame.draw.rect(self.screen, YELLOW, (SCREEN_WIDTH - 180, 170, 30, 30))
+            archer_tower_text = self.font.render(f"Archer: {BUILDING_COST['archer_tower']['gold']}g", True, BLACK)
+            self.screen.blit(archer_tower_text, (SCREEN_WIDTH - 140, 175))
+            
+            # Highlight selected building
+            if self.selected_building_type == 'cannon':
+                pygame.draw.rect(self.screen, BLACK, (SCREEN_WIDTH - 180, 130, 30, 30), 2)
+            elif self.selected_building_type == 'archer_tower':
+                pygame.draw.rect(self.screen, BLACK, (SCREEN_WIDTH - 180, 170, 30, 30), 2)
+            
+            # Start battle button
+            pygame.draw.rect(self.screen, GREEN, (SCREEN_WIDTH - 180, SCREEN_HEIGHT - 60, 160, 40))
+            battle_text = self.font.render("Start Battle", True, BLACK)
+            self.screen.blit(battle_text, (SCREEN_WIDTH - 150, SCREEN_HEIGHT - 45))
+        
+        # Draw troop selection UI (only in battle phase)
+        elif self.game_phase == "battle":
+            title_text = self.font.render("Troops", True, BLACK)
+            self.screen.blit(title_text, (SCREEN_WIDTH - 150, 100))
+            
+            # Warrior
+            pygame.draw.circle(self.screen, RED, (SCREEN_WIDTH - 165, 145), 15)
+            warrior_text = self.font.render(f"Warrior: {TROOP_COST['warrior']['elixir']}e", True, BLACK)
+            self.screen.blit(warrior_text, (SCREEN_WIDTH - 140, 135))
+            
+            # Archer
+            pygame.draw.circle(self.screen, GREEN, (SCREEN_WIDTH - 165, 185), 15)
+            archer_text = self.font.render(f"Archer: {TROOP_COST['archer']['elixir']}e", True, BLACK)
+            self.screen.blit(archer_text, (SCREEN_WIDTH - 140, 175))
+            
+            # Highlight selected troop
+            if self.selected_troop_type == 'warrior':
+                pygame.draw.circle(self.screen, BLACK, (SCREEN_WIDTH - 165, 145), 17, 2)
+            elif self.selected_troop_type == 'archer':
+                pygame.draw.circle(self.screen, BLACK, (SCREEN_WIDTH - 165, 185), 17, 2)
+        
+        # Game over message
+        if self.game_over:
+            game_over_surface = pygame.Surface((400, 200), pygame.SRCALPHA)
+            game_over_surface.fill((0, 0, 0, 150))
+            self.screen.blit(game_over_surface, (SCREEN_WIDTH//2 - 200, SCREEN_HEIGHT//2 - 100))
+            
+            if hasattr(self, 'victory') and self.victory:
+                result_text = pygame.font.SysFont(None, 48).render("VICTORY!", True, GREEN)
+            else:
+                result_text = pygame.font.SysFont(None, 48).render("DEFEAT!", True, RED)
+                
+            restart_text = self.font.render("Press R to restart", True, WHITE)
+            
+            self.screen.blit(result_text, (SCREEN_WIDTH//2 - 80, SCREEN_HEIGHT//2 - 30))
+            self.screen.blit(restart_text, (SCREEN_WIDTH//2 - 80, SCREEN_HEIGHT//2 + 30))
+    
+    def handle_events(self):
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                pygame.quit()
+                sys.exit()
+            
+            elif event.type == KEYDOWN:
+                if event.key == K_r and self.game_over:
+                    self.reset_game()
+                    
+            elif event.type == MOUSEBUTTONDOWN:
+                x, y = pygame.mouse.get_pos()
+                
+                # Handle UI sidebar clicks
+                if SCREEN_WIDTH - 200 <= x <= SCREEN_WIDTH:
+                    # Building selection (building phase)
+                    if self.game_phase == "building":
+                        if 130 <= y <= 160:
+                            self.selected_building_type = 'cannon'
+                        elif 170 <= y <= 200:
+                            self.selected_building_type = 'archer_tower'
+                        
+                        # Start battle button
+                        if SCREEN_HEIGHT - 60 <= y <= SCREEN_HEIGHT - 20:
+                            if self.buildings:  # Only start battle if there are buildings
+                                self.game_phase = "battle"
+                    
+                    # Troop selection (battle phase)
+                    elif self.game_phase == "battle":
+                        if 130 <= y <= 160:
+                            self.selected_troop_type = 'warrior'
+                        elif 170 <= y <= 200:
+                            self.selected_troop_type = 'archer'
+                
+                # Handle grid clicks
+                elif x < SCREEN_WIDTH - 200 and not self.game_over:
+                    grid_x = x // GRID_SIZE
+                    grid_y = y // GRID_SIZE
+                    
+                    if self.game_phase == "building":
+                        # Place building
+                        self.place_building(grid_y, grid_x)
+                    elif self.game_phase == "battle":
+                        # Deploy troop
+                        self.deploy_troop(x, y)
+    
+    def run(self):
+        while True:
+            self.handle_events()
+            self.update()
+            self.draw()
+            self.clock.tick(FPS)
+
+if __name__ == "__main__":
+    game = Game()
+    game.run()
